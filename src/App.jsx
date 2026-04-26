@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import {
   Zap, Clock, Calendar, Users, Briefcase, FileSpreadsheet, Settings,
-  LogOut, Plus, Trash2, Copy, Check, Edit2, Download, X, AlertCircle, Lock
+  LogOut, Plus, Trash2, Copy, Check, Edit2, Download, X, AlertCircle, Lock,
+  Search, ChevronDown
 } from 'lucide-react';
 import { db } from './lib/supabase.js';
 
@@ -213,6 +214,170 @@ const styles = `
   .scrollbar-thin::-webkit-scrollbar-track { background: var(--bg); }
   .scrollbar-thin::-webkit-scrollbar-thumb { background: var(--ink); }
 `;
+
+// ===== COMMESSA SELECT (dropdown searchable) =====
+function CommessaSelect({ value, onChange, options, placeholder = '— Seleziona commessa —', autoFocus = false }) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const [highlightIdx, setHighlightIdx] = useState(0);
+  const containerRef = useRef(null);
+  const inputRef = useRef(null);
+  const listRef = useRef(null);
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return options;
+    return options.filter(o => o.nome.toLowerCase().includes(q));
+  }, [options, search]);
+
+  // Chiudi cliccando fuori
+  useEffect(() => {
+    const handler = (e) => {
+      if (containerRef.current && !containerRef.current.contains(e.target)) {
+        setOpen(false);
+        setSearch('');
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  // Reset highlight quando cambia il filtro
+  useEffect(() => { setHighlightIdx(0); }, [search]);
+
+  // Auto-scroll dell'item evidenziato
+  useEffect(() => {
+    if (open && listRef.current) {
+      const el = listRef.current.querySelector(`[data-idx="${highlightIdx}"]`);
+      if (el) el.scrollIntoView({ block: 'nearest' });
+    }
+  }, [highlightIdx, open]);
+
+  const handleSelect = (option) => {
+    onChange(option.nome);
+    setOpen(false);
+    setSearch('');
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setHighlightIdx(prev => Math.min(prev + 1, filtered.length - 1));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setHighlightIdx(prev => Math.max(prev - 1, 0));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (filtered[highlightIdx]) handleSelect(filtered[highlightIdx]);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      setOpen(false);
+      setSearch('');
+    }
+  };
+
+  const openDropdown = () => {
+    setOpen(true);
+    setTimeout(() => inputRef.current?.focus(), 10);
+  };
+
+  return (
+    <div ref={containerRef} style={{ position: 'relative' }}>
+      {!open ? (
+        <button
+          type="button"
+          onClick={openDropdown}
+          autoFocus={autoFocus}
+          className="select"
+          style={{
+            textAlign: 'left',
+            cursor: 'pointer',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            color: value ? 'var(--ink)' : '#999',
+            fontWeight: value ? 500 : 400,
+          }}
+        >
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {value || placeholder}
+          </span>
+          <ChevronDown size={16} style={{ flexShrink: 0, marginLeft: 8 }} />
+        </button>
+      ) : (
+        <>
+          <div style={{ position: 'relative' }}>
+            <Search size={16} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--muted)', pointerEvents: 'none' }} />
+            <input
+              ref={inputRef}
+              className="input"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Digita per cercare…"
+              style={{ paddingLeft: 38 }}
+            />
+          </div>
+          <div
+            ref={listRef}
+            style={{
+              position: 'absolute',
+              top: 'calc(100% + 6px)',
+              left: 0,
+              right: 0,
+              background: 'var(--paper)',
+              border: '2px solid var(--ink)',
+              boxShadow: '4px 4px 0 var(--line)',
+              maxHeight: 240,
+              overflowY: 'auto',
+              zIndex: 30,
+            }}
+            className="scrollbar-thin"
+          >
+            {filtered.length === 0 ? (
+              <div style={{ padding: 14, color: 'var(--muted)', fontSize: 13, textAlign: 'center' }}>
+                Nessuna commessa trovata
+              </div>
+            ) : (
+              filtered.map((o, idx) => {
+                const isSelected = o.nome === value;
+                const isHighlighted = idx === highlightIdx;
+                return (
+                  <button
+                    key={o.id}
+                    type="button"
+                    data-idx={idx}
+                    onClick={() => handleSelect(o)}
+                    onMouseEnter={() => setHighlightIdx(idx)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      width: '100%',
+                      textAlign: 'left',
+                      padding: '11px 14px',
+                      border: 'none',
+                      borderBottom: idx < filtered.length - 1 ? '1px solid #eee' : 'none',
+                      background: isHighlighted ? 'var(--accent)' : 'var(--paper)',
+                      color: 'var(--ink)',
+                      cursor: 'pointer',
+                      fontSize: 14,
+                      fontWeight: isSelected ? 700 : 500,
+                      fontFamily: 'Manrope, sans-serif',
+                    }}
+                  >
+                    <span>{o.nome}</span>
+                    {isSelected && <Check size={14} strokeWidth={3} />}
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
 
 // ===== TOAST =====
 function Toast({ message, type, onClose }) {
@@ -1067,9 +1232,11 @@ function EditReportModal({ report, users, commesse, onClose, onSave }) {
             </div>
             <div>
               <label className="label">Commessa</label>
-              <select className="select" value={form.commessa} onChange={e => setForm({ ...form, commessa: e.target.value })}>
-                {commesse.map(c => <option key={c.id} value={c.nome}>{c.nome}</option>)}
-              </select>
+              <CommessaSelect
+                value={form.commessa}
+                onChange={(nome) => setForm({ ...form, commessa: nome })}
+                options={commesse}
+              />
             </div>
           </div>
 
@@ -1287,10 +1454,12 @@ function UserForm({ user, commesse, reports, refreshReports, showToast, companyN
 
           <div style={{ marginBottom: 20 }}>
             <label className="label"><Briefcase size={12} style={{ display: 'inline', marginRight: 4 }} /> Commessa</label>
-            <select className="select" value={commessa} onChange={e => setCommessa(e.target.value)}>
-              <option value="">— Seleziona commessa —</option>
-              {commesse.map(c => <option key={c.id} value={c.nome}>{c.nome}</option>)}
-            </select>
+            <CommessaSelect
+              value={commessa}
+              onChange={setCommessa}
+              options={commesse}
+              placeholder="— Seleziona commessa —"
+            />
           </div>
 
           {isFerieMalattia && (
